@@ -1,10 +1,10 @@
-# Password Generator
+# Motion Detection Alarm
 
 ![Python](https://img.shields.io/badge/python-3.x-blue)
-![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![Interface](https://img.shields.io/badge/interface-CLI-lightgrey)
+![OpenCV](https://img.shields.io/badge/vision-OpenCV-5C3EE8)
+![pygame](https://img.shields.io/badge/audio-pygame-yellowgreen)
 
-A command-line password generator in Python. It asks for a length, validates the input, and builds a password that always mixes lowercase and uppercase letters, digits and symbols, in random order.
+A webcam motion detector with an audible alarm. When alarm mode is armed, the program compares consecutive video frames, and if movement persists for long enough, it plays an alarm sound. Detection runs entirely on the local machine and nothing is recorded or stored.
 
 ---
 
@@ -12,76 +12,97 @@ A command-line password generator in Python. It asks for a length, validates the
 
 ```mermaid
 flowchart LR
-    A[Ask for length] --> B{Number<br/>and ≥ 8?}
-    B -- No --> A
-    B -- Yes --> C[Split length<br/>30% · 30% · 20% · 20%]
-    C --> D[Pick characters<br/>from each set]
-    D --> E[Shuffle]
-    E --> F[Print password]
+    A[Webcam frame] --> B[Resize, greyscale<br/>and blur]
+    B --> C[Difference with<br/>previous frame]
+    C --> D[Threshold<br/>changed pixels]
+    D --> E{Change<br/>detected?}
+    E -- Yes --> F[Counter +1]
+    E -- No --> G[Counter −1]
+    F --> H{Counter<br/>> 20?}
+    H -- Yes --> I[Alarm thread<br/>5 beeps + cooldown]
 ```
 
-1. **Input validation.** The user enters a length. Non-numeric input and values below 8 are rejected, and the user is asked again.
-2. **Composition.** The length is split across four character sets, so every password contains all four types:
+1. **Preprocessing.** Each frame is resized to 500 pixels wide, converted to greyscale and blurred. Blurring smooths out camera noise so that tiny pixel fluctuations are not mistaken for movement.
+2. **Frame differencing.** The current frame is subtracted from the previous one. Pixels whose brightness changed by more than 25 (on a 0–255 scale) are marked white; everything else is black.
+3. **Persistence counter.** A frame with changed pixels adds 1 to a counter; a still frame subtracts 1. This filters out brief flickers: the alarm only fires when movement is sustained across many frames.
+4. **Alarm.** Once the counter passes 20, a background thread plays the alarm five times, one second apart, then waits five seconds before it can trigger again. Running the alarm in a separate thread keeps the video feed responsive.
 
-   | Character set | Share | Example characters |
-   |---|---|---|
-   | Lowercase letters | 30% | `a`–`z` |
-   | Uppercase letters | 30% | `A`–`Z` |
-   | Digits | 20% | `0`–`9` |
-   | Symbols | 20% | `! # $ % & * @ ...` |
-
-3. **Selection.** Each character set is shuffled and the first characters are taken, so no character repeats within a set.
-4. **Final shuffle.** The selected characters are shuffled together, so the types are not grouped in a predictable order.
-
-### Example
-
-```
-How many characters do you want in your password? abc
-Please, Enter numbers only.
-How many characters do you want in your password? 5
-Your number should be at least 8.
-Please, Enter your number again: 16
-Strong Password:  U9dOT0J};8vRcb<y
-```
+While armed, the window shows the thresholded difference image, so you can see exactly which pixels the detector considers to be moving.
 
 ---
 
 ## Getting started
 
-Requires Python 3 and nothing else; the script uses only the standard library.
+### Prerequisites
+
+- Python 3
+- A webcam
+
+### Installation
 
 ```bash
-git clone https://github.com/JRBaiao/Password-Generator.git
-cd Password-Generator
-python "Password Generator/main.py"
+git clone https://github.com/JRBaiao/Motion-Detection-System-.git
+cd Motion-Detection-System-
+pip install -r requirements.txt
 ```
+
+### Run
+
+Run the script from the project folder, so that it can find `alarm.wav`:
+
+```bash
+python main.py
+```
+
+### Controls
+
+| Key | Action |
+|---|---|
+| `t` | Arm or disarm the alarm |
+| `q` | Quit |
+
+When the program starts, the alarm is disarmed and the window shows the normal camera view. Press `t` to arm it.
 
 ---
 
-## Security notes
+## Configuration
 
-Building a password generator raises questions that matter in any security context:
+The detection behaviour is controlled by a few values in `main.py`:
 
-**Which random generator?** This version uses Python's `random` module, which is designed for simulations, not security. Its output can be predicted by an attacker who observes enough values. The [Python documentation](https://docs.python.org/3/library/random.html) recommends the `secrets` module for passwords and other security-sensitive values, as it draws from the operating system's cryptographically secure source.
+| Setting | Value | Effect |
+|---|---|---|
+| Pixel change threshold | `25` | How much a pixel's brightness must change to count as movement |
+| Motion threshold | `threshold.sum() > 10` | How much changed area is needed for a frame to count as motion |
+| Persistence | `alarm_counter > 20` | How many net motion frames trigger the alarm |
+| Blur kernel | `(5, 5)` | Larger values ignore smaller movements and noise |
+| Beeps / cooldown | `5` / `5 s` | Alarm length and pause before it can trigger again |
 
-**How strong is the result?** Strength is measured in *entropy*: the number of guesses an attacker would need. A 16-character password from this generator has about **95 bits** of entropy. A fully random 16-character password over the same 94 characters would have about **105 bits**. The difference comes from the fixed composition and from never repeating a character within a set, which both reduce the number of possible passwords. Both values are far beyond what brute force can reach; the choice of random generator matters much more.
+---
 
-**Length beats complexity.** Current guidance from [NIST SP 800-63B](https://pages.nist.gov/800-63-4/sp800-63b.html) puts length ahead of composition rules. Each extra character adds more strength than forcing a specific mix of character types.
+## Project structure
+
+```
+├── main.py      # Capture, detection loop and alarm
+├── alarm.wav    # Alarm sound
+└── requirements.txt
+```
 
 ---
 
 ## Limitations
 
-- **Not cryptographically secure**, as explained above.
-- **Lengths can be off by one.** The 30/20 split is rounded, so some lengths give a slightly different result. For example, asking for 9 characters returns 10, and 11 returns 10.
-- **Maximum length of 52.** Because characters don't repeat within a set and there are only 10 digits, asking for 53 or more characters causes an error.
-- **One password per run**, with no options for excluding symbols or similar-looking characters such as `l`, `1` and `I`.
+- **Very high sensitivity.** In the thresholded image, each changed pixel has a value of 255, so `threshold.sum() > 10` is true as soon as a single pixel changes. Camera noise or a small change in lighting can therefore count as motion. A threshold based on the *number* of changed pixels, for example `cv2.countNonZero(threshold) > 500`, gives far more control.
+- **Lighting changes look like motion.** Frame differencing reacts to any change in brightness, so a light switching on or a cloud passing can trigger the alarm.
+- **No location or recording.** The detector knows *that* something moved, but does not mark where, and saves no images or log of events.
+- **No camera check.** If the webcam is unavailable, the program fails with an error instead of a clear message.
 
 ## Roadmap
 
-- Switch to the `secrets` module
-- Generate exactly the requested length, with any remainder filled from all character sets
-- Allow repeated characters, which removes the length limit and increases entropy
-- Show the entropy of each generated password
-- Add options to exclude symbols or ambiguous characters
-- Add a passphrase mode that combines random words, which is easier to remember at the same strength
+- Replace the pixel-sum check with a minimum moving area, and draw bounding boxes around moving objects using contours
+- Use background subtraction (`cv2.createBackgroundSubtractorMOG2`) to cope better with gradual lighting changes
+- Log timestamped motion events, with optional snapshots
+- Add a check that the camera opened successfully
+
+### Privacy by design
+
+Because the current version records nothing, it raises no data retention questions. If snapshot or video saving is added, footage of people becomes personal data under the GDPR. A responsible design would then need a clear purpose, limited retention, secure storage and signage where others could be filmed, and the roadmap above should be implemented with those requirements in mind.
